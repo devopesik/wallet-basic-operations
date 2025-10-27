@@ -1,0 +1,80 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
+logs/
+
+# Тестовые артефакты
+coverage.out
+coverage.html
+*.test
+*.prof
+
+# Документация
+*.md
+docs/
+README*
+
+# Конфигурация окружения
+.env
+.env.local
+.env.*.local
+
+# Временные файлы
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Кэш
+.cache/
+node_modules/
+vendor/
+
+# Инструменты разработки
+tools/
+.bin/
+
+# Тестовые данные
+test/data/
+test/fixtures/
+
+# Сборочные артефакты
+dist/
+build/
+bin/
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Makefile
+Makefile
+makefile
+
+# Ansible (если используется)
+.ansible/
+
+# База данных (локальные файлы)
+*.db
+*.sqlite
+*.sqlite3
+
+# Go специфичные
+go.work
+go.work.sum

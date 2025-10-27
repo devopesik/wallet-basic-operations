@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: postgres-test
+    ports:
+      - "${DB_PORT}:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+    volumes:
+      - ./sql/:/docker-entrypoint-initdb.d/
+    networks:
+      - wallet-network-test
+
+networks:
+  wallet-network-test:
+    driver: bridge
+
