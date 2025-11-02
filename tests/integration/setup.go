@@ -19,7 +19,7 @@ func testServer(t *testing.T) (string, func()) {
 		cfg.DBHost = dbHost
 	}
 
-	srv, err := app.StartServer(cfg)
+	application, err := app.StartServer(cfg)
 	if err != nil {
 		t.Fatalf("не удалось запустить сервер: %v", err)
 	}
@@ -57,8 +57,8 @@ func testServer(t *testing.T) (string, func()) {
 	log.Println("Server is healthy, starting tests.")
 
 	cleanup := func() {
-		if err := srv.Shutdown(context.Background()); err != nil {
-			log.Printf("ошибка при остановке сервера: %v", err)
+		if err := application.Shutdown(context.Background()); err != nil {
+			log.Printf("ошибка при остановке приложения: %v", err)
 		}
 	}
 

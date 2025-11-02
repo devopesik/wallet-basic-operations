@@ -6,8 +6,15 @@ import (
 	"github.com/google/uuid"
 )
 
+// Wallet представляет структуру кошелька
+type Wallet struct {
+	ID      uuid.UUID
+	Balance int64
+}
+
 type WalletRepository interface {
-	GetBalance(ctx context.Context, walletID uuid.UUID) (int64, error)
-	UpdateBalance(ctx context.Context, walletID uuid.UUID, amount int64, isDeposit bool) error
-	CreateWallet(ctx context.Context, walletID uuid.UUID) error
+	GetWallet(ctx context.Context, walletID uuid.UUID) (*Wallet, error)
+	Deposit(ctx context.Context, walletID uuid.UUID, amount int64) error
+	Withdraw(ctx context.Context, walletID uuid.UUID, amount int64) error
+	CreateWallet(ctx context.Context) (*Wallet, error)
 }

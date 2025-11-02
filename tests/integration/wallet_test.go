@@ -6,29 +6,38 @@ import (
 	"io"
 	"net/http"
 	"testing"
-
-	"github.com/google/uuid"
 )
 
 func TestWalletIntegration(t *testing.T) {
 	baseURL, cleanup := testServer(t)
 	defer cleanup()
 
-	walletID := uuid.New().String()
-
-	// 0. Создание кошелька
-	createReq := map[string]interface{}{
-		"walletId": walletID,
-	}
-	body, _ := json.Marshal(createReq)
-	resp, err := http.Post(baseURL+"/api/v1/wallets", "application/json", bytes.NewReader(body))
+	// 0. Создание кошелька (UUID генерируется автоматически)
+	resp, err := http.Post(baseURL+"/api/v1/wallets", "application/json", bytes.NewReader([]byte("{}")))
 	if err != nil {
 		t.Fatalf("ошибка при создании кошелька: %v", err)
 	}
 	if resp.StatusCode != http.StatusCreated {
-		t.Errorf("ожидался статус 201, получен %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("ожидался статус 201, получен %d, тело: %s", resp.StatusCode, string(body))
+	}
+
+	var createResp struct {
+		WalletId string `json:"walletId"`
+		Balance  int64  `json:"balance"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&createResp); err != nil {
+		t.Fatalf("ошибка декодирования ответа создания кошелька: %v", err)
 	}
 	_ = resp.Body.Close()
+
+	walletID := createResp.WalletId
+	if walletID == "" {
+		t.Fatal("UUID не был возвращен при создании кошелька")
+	}
+	if createResp.Balance != 0 {
+		t.Errorf("ожидался баланс 0, получен %d", createResp.Balance)
+	}
 
 	// 1. Депозит
 	depositReq := map[string]interface{}{
@@ -36,8 +45,8 @@ func TestWalletIntegration(t *testing.T) {
 		"operationType": "DEPOSIT",
 		"amount":        1000,
 	}
-	body, _ = json.Marshal(depositReq)
-	resp, err = http.Post(baseURL+"/api/v1/wallet", "application/json", bytes.NewReader(body))
+	depositBody, _ := json.Marshal(depositReq)
+	resp, err = http.Post(baseURL+"/api/v1/wallet", "application/json", bytes.NewReader(depositBody))
 	if err != nil {
 		t.Fatalf("ошибка при депозите: %v", err)
 	}
@@ -75,8 +84,8 @@ func TestWalletIntegration(t *testing.T) {
 		"operationType": "WITHDRAW",
 		"amount":        300,
 	}
-	body, _ = json.Marshal(withdrawReq)
-	req, _ := http.NewRequest("POST", baseURL+"/api/v1/wallet", bytes.NewReader(body))
+	withdrawBody, _ := json.Marshal(withdrawReq)
+	req, _ := http.NewRequest("POST", baseURL+"/api/v1/wallet", bytes.NewReader(withdrawBody))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -96,8 +105,8 @@ func TestWalletIntegration(t *testing.T) {
 		_ = Body.Close()
 	}(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("ошибка: статус %d, тело: %s", resp.StatusCode, string(body))
+		errorBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("ошибка: статус %d, тело: %s", resp.StatusCode, string(errorBody))
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&balanceResp); err != nil {
 		t.Fatalf("ошибка декодирования: %v", err)

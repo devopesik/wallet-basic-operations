@@ -8,29 +8,35 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func TestWalletConcurrentLoad(t *testing.T) {
 	baseURL, cleanup := testServer(t)
 	defer cleanup()
 
-	walletID := uuid.New().String()
-
-	// 1. Создание кошелька
-	createReq := map[string]interface{}{
-		"walletId": walletID,
-	}
-	body, _ := json.Marshal(createReq)
-	resp, err := http.Post(baseURL+"/api/v1/wallets", "application/json", bytes.NewReader(body))
+	// 1. Создание кошелька (UUID генерируется автоматически)
+	resp, err := http.Post(baseURL+"/api/v1/wallets", "application/json", bytes.NewReader([]byte("{}")))
 	if err != nil {
 		t.Fatalf("ошибка при создании кошелька: %v", err)
 	}
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("ожидался статус 201, получен %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("ожидался статус 201, получен %d, тело: %s", resp.StatusCode, string(body))
+	}
+
+	var createResp struct {
+		WalletId string `json:"walletId"`
+		Balance  int64  `json:"balance"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&createResp); err != nil {
+		t.Fatalf("ошибка декодирования ответа создания кошелька: %v", err)
 	}
 	_ = resp.Body.Close()
+
+	walletID := createResp.WalletId
+	if walletID == "" {
+		t.Fatal("UUID не был возвращен при создании кошелька")
+	}
 
 	// 2. Начальный депозит для обеспечения средств для операций
 	initialDeposit := map[string]interface{}{
@@ -38,8 +44,8 @@ func TestWalletConcurrentLoad(t *testing.T) {
 		"operationType": "DEPOSIT",
 		"amount":        1000000, // 1 миллион для обеспечения операций
 	}
-	body, _ = json.Marshal(initialDeposit)
-	resp, err = http.Post(baseURL+"/api/v1/wallet", "application/json", bytes.NewReader(body))
+	depositBody, _ := json.Marshal(initialDeposit)
+	resp, err = http.Post(baseURL+"/api/v1/wallet", "application/json", bytes.NewReader(depositBody))
 	if err != nil {
 		t.Fatalf("ошибка при начальном депозите: %v", err)
 	}
@@ -211,21 +217,29 @@ func TestWalletConcurrentLoad_SustainedHighRPS(t *testing.T) {
 	baseURL, cleanup := testServer(t)
 	defer cleanup()
 
-	walletID := uuid.New().String()
-
-	// Создание кошелька
-	createReq := map[string]interface{}{
-		"walletId": walletID,
-	}
-	body, _ := json.Marshal(createReq)
-	resp, err := http.Post(baseURL+"/api/v1/wallets", "application/json", bytes.NewReader(body))
+	// Создание кошелька (UUID генерируется автоматически)
+	resp, err := http.Post(baseURL+"/api/v1/wallets", "application/json", bytes.NewReader([]byte("{}")))
 	if err != nil {
 		t.Fatalf("ошибка при создании кошелька: %v", err)
 	}
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("ожидался статус 201, получен %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("ожидался статус 201, получен %d, тело: %s", resp.StatusCode, string(body))
+	}
+
+	var createResp struct {
+		WalletId string `json:"walletId"`
+		Balance  int64  `json:"balance"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&createResp); err != nil {
+		t.Fatalf("ошибка декодирования ответа создания кошелька: %v", err)
 	}
 	_ = resp.Body.Close()
+
+	walletID := createResp.WalletId
+	if walletID == "" {
+		t.Fatal("UUID не был возвращен при создании кошелька")
+	}
 
 	// Начальный депозит
 	initialDeposit := map[string]interface{}{
@@ -233,8 +247,8 @@ func TestWalletConcurrentLoad_SustainedHighRPS(t *testing.T) {
 		"operationType": "DEPOSIT",
 		"amount":        5000000,
 	}
-	body, _ = json.Marshal(initialDeposit)
-	resp, err = http.Post(baseURL+"/api/v1/wallet", "application/json", bytes.NewReader(body))
+	depositBody, _ := json.Marshal(initialDeposit)
+	resp, err = http.Post(baseURL+"/api/v1/wallet", "application/json", bytes.NewReader(depositBody))
 	if err != nil {
 		t.Fatalf("ошибка при начальном депозите: %v", err)
 	}

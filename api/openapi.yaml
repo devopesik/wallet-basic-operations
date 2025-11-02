@@ -57,11 +57,12 @@ paths:
     post:
       operationId: CreateWallet
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateWalletRequest'
+              type: object
+              properties: {}
       responses:
         '201':
           description: Кошелёк успешно создан
@@ -129,13 +130,6 @@ components:
           format: int64
           minimum: 1
 
-    CreateWalletRequest:
-      type: object
-      required: [walletId]
-      properties:
-        walletId:
-          type: string
-          format: uuid
 
     WalletBalanceResponse:
       type: object

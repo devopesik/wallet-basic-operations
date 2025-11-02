@@ -13,9 +13,17 @@ import (
 	"github.com/devopesik/wallet-basic-operations/internal/repository/postgres"
 	"github.com/devopesik/wallet-basic-operations/internal/service"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func StartServer(cfg *config.Config) (*http.Server, error) {
+// App представляет приложение с сервером и пулом БД
+type App struct {
+	Server *http.Server
+	Pool   *pgxpool.Pool
+}
+
+// StartServer создает и запускает HTTP сервер
+func StartServer(cfg *config.Config) (*App, error) {
 	if err := postgres.RunMigrations(cfg); err != nil {
 		return nil, err
 	}
@@ -49,5 +57,23 @@ func StartServer(cfg *config.Config) (*http.Server, error) {
 		}
 	}()
 
-	return server, nil
+	return &App{
+		Server: server,
+		Pool:   pool,
+	}, nil
+}
+
+// Shutdown корректно останавливает сервер и закрывает пул БД
+func (a *App) Shutdown(ctx context.Context) error {
+	if a.Server != nil {
+		if err := a.Server.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+
+	if a.Pool != nil {
+		a.Pool.Close()
+	}
+
+	return nil
 }

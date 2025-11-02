@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"fmt"
 
+	apperrors "github.com/devopesik/wallet-basic-operations/internal/errors"
 	"github.com/devopesik/wallet-basic-operations/internal/repository"
 	"github.com/google/uuid"
 )
@@ -16,25 +16,24 @@ func NewWalletService(repo repository.WalletRepository) WalletService {
 	return &walletService{repo: repo}
 }
 
-func (s *walletService) ProcessOperation(ctx context.Context, walletID uuid.UUID, opType OperationType, amount int64) error {
+func (s *walletService) Deposit(ctx context.Context, walletID uuid.UUID, amount int64) error {
 	if amount <= 0 {
-		return fmt.Errorf("сумма должна быть положительной")
+		return apperrors.ErrInvalidAmount
 	}
-
-	switch opType {
-	case OperationDeposit:
-		return s.repo.UpdateBalance(ctx, walletID, amount, true)
-	case OperationWithdraw:
-		return s.repo.UpdateBalance(ctx, walletID, amount, false)
-	default:
-		return fmt.Errorf("неизвестный тип операции: %s", opType)
-	}
+	return s.repo.Deposit(ctx, walletID, amount)
 }
 
-func (s *walletService) GetBalance(ctx context.Context, walletID uuid.UUID) (int64, error) {
-	return s.repo.GetBalance(ctx, walletID)
+func (s *walletService) Withdraw(ctx context.Context, walletID uuid.UUID, amount int64) error {
+	if amount <= 0 {
+		return apperrors.ErrInvalidAmount
+	}
+	return s.repo.Withdraw(ctx, walletID, amount)
 }
 
-func (s *walletService) CreateWallet(ctx context.Context, walletID uuid.UUID) error {
-	return s.repo.CreateWallet(ctx, walletID)
+func (s *walletService) GetWallet(ctx context.Context, walletID uuid.UUID) (*repository.Wallet, error) {
+	return s.repo.GetWallet(ctx, walletID)
+}
+
+func (s *walletService) CreateWallet(ctx context.Context) (*repository.Wallet, error) {
+	return s.repo.CreateWallet(ctx)
 }

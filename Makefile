@@ -4,11 +4,13 @@
 TEST_COMPOSE_FILE := docker-compose.test.yml
 TEST_ENV := DB_HOST=localhost MIGRATIONS_PATH=../../migrations
 TEST_CMD := go test -v -race -timeout 120s
+TEST_UNIT := ./tests/unit/...
+TEST_INTEGRATION := ./tests/integration/...
 DEBUG_CMD := go run ./cmd/app/main.go
 DEBUG_ENV := DB_HOST=localhost MIGRATIONS_PATH=./migrations
 
 # .PHONY указывает, что эти цели не являются файлами
-.PHONY: help test test-coverage lint fmt tidy up-db down ci run stop test-and-run
+.PHONY: help test test-unit test-integration test-coverage lint fmt tidy up-db down ci run stop test-and-run
 
 # Выполнять каждую цель в одной оболочке для корректной работы trap
 .ONESHELL:
@@ -35,9 +37,25 @@ test: ## Запустить полный цикл тестов (БД -> тест
 	$(MAKE) up-db; \
 	echo "--> Waiting for the database to be ready..."; \
 	sleep 3; \
-	echo "--> Running Go tests..."; \
-	$(TEST_ENV) $(TEST_CMD) ./...
+	echo "--> Running unit tests..."; \
+	$(TEST_CMD) $(TEST_UNIT); \
+	echo "--> Running integration tests..."; \
+	$(TEST_ENV) $(TEST_CMD) $(TEST_INTEGRATION)
 	@echo "✅ Tests passed successfully!"
+
+test-unit: ## Запустить только unit тесты
+	@echo "-> Running unit tests..."
+	$(TEST_CMD) $(TEST_UNIT)
+	@echo "✅ Unit tests passed successfully!"
+
+test-integration: ## Запустить только integration тесты (требует БД)
+	@echo "-> Running integration tests..."
+	trap '$(MAKE) down' EXIT; \
+	$(MAKE) up-db; \
+	echo "--> Waiting for the database to be ready..."; \
+	sleep 3; \
+	$(TEST_ENV) $(TEST_CMD) $(TEST_INTEGRATION)
+	@echo "✅ Integration tests passed successfully!"
 
 test-coverage: ## Запустить тесты и сгенерировать отчет о покрытии
 	@echo "-> Running tests with coverage..."
@@ -45,9 +63,12 @@ test-coverage: ## Запустить тесты и сгенерировать о
 	$(MAKE) up-db; \
 	echo "--> Waiting for the database to be ready..."; \
 	sleep 3; \
-	$(TEST_ENV) $(TEST_CMD) -coverprofile=coverage.out ./...; \
-	go tool cover -html=coverage.out
-	@echo "✅ Coverage report generated."
+	echo "--> Running unit tests with coverage..."; \
+	$(TEST_CMD) -coverprofile=coverage-unit.out $(TEST_UNIT); \
+	echo "--> Running integration tests..."; \
+	$(TEST_ENV) $(TEST_CMD) $(TEST_INTEGRATION); \
+	go tool cover -html=coverage-unit.out -o coverage.html
+	@echo "✅ Coverage report generated: coverage.html"
 
 # --- Команды для запуска приложения ---
 

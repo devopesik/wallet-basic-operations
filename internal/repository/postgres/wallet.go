@@ -2,9 +2,9 @@ package postgres
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	stderrors "errors"
 
+	apperrors "github.com/devopesik/wallet-basic-operations/internal/errors"
 	"github.com/devopesik/wallet-basic-operations/internal/repository"
 	"github.com/google/uuid"
 	"github.com/jackc/pgerrcode"
@@ -21,57 +21,73 @@ func NewWalletRepository(pool *pgxpool.Pool) repository.WalletRepository {
 	return &walletRepository{pool: pool}
 }
 
-func (r *walletRepository) GetBalance(ctx context.Context, walletID uuid.UUID) (int64, error) {
-	var balance int64
-	err := r.pool.QueryRow(ctx, "SELECT balance FROM wallets WHERE id = $1", walletID).Scan(&balance)
+func (r *walletRepository) GetWallet(ctx context.Context, walletID uuid.UUID) (*repository.Wallet, error) {
+	var wallet repository.Wallet
+	err := r.pool.QueryRow(ctx, "SELECT id, balance FROM wallets WHERE id = $1", walletID).Scan(&wallet.ID, &wallet.Balance)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return 0, fmt.Errorf("кошелёк не найден")
+			return nil, apperrors.ErrWalletNotFound
 		}
-		return 0, fmt.Errorf("ошибка базы данных при получении баланса: %w", err)
+		return nil, apperrors.NewDatabaseError("получении кошелька", err)
 	}
-	return balance, nil
+	return &wallet, nil
 }
 
-func (r *walletRepository) UpdateBalance(ctx context.Context, walletID uuid.UUID, amount int64, isDeposit bool) error {
+func (r *walletRepository) Deposit(ctx context.Context, walletID uuid.UUID, amount int64) error {
 	if amount <= 0 {
-		return fmt.Errorf("сумма должна быть положительной")
+		return apperrors.ErrInvalidAmount
 	}
 
-	var result pgconn.CommandTag
-	var err error
-
-	if isDeposit {
-		query := "UPDATE wallets SET balance = balance + $1 WHERE id = $2"
-		result, err = r.pool.Exec(ctx, query, amount, walletID)
-	} else {
-		query := "UPDATE wallets SET balance = balance - $1 WHERE id = $2 AND balance >= $1"
-		result, err = r.pool.Exec(ctx, query, amount, walletID)
-	}
-
+	query := "UPDATE wallets SET balance = balance + $1 WHERE id = $2"
+	result, err := r.pool.Exec(ctx, query, amount, walletID)
 	if err != nil {
-		return fmt.Errorf("ошибка базы данных при обновлении баланса: %w", err)
+		return apperrors.NewDatabaseError("пополнении баланса", err)
 	}
 
 	if result.RowsAffected() == 0 {
-		if isDeposit {
-			return fmt.Errorf("кошелёк не найден")
-		} else {
-			return fmt.Errorf("недостаточно средств")
-		}
+		return apperrors.ErrWalletNotFound
 	}
 
 	return nil
 }
 
-func (r *walletRepository) CreateWallet(ctx context.Context, walletID uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, "INSERT INTO wallets (id, balance) VALUES ($1, 0)", walletID)
+func (r *walletRepository) Withdraw(ctx context.Context, walletID uuid.UUID, amount int64) error {
+	if amount <= 0 {
+		return apperrors.ErrInvalidAmount
+	}
+
+	query := "UPDATE wallets SET balance = balance - $1 WHERE id = $2 AND balance >= $1"
+	result, err := r.pool.Exec(ctx, query, amount, walletID)
+	if err != nil {
+		return apperrors.NewDatabaseError("списании баланса", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		// Проверяем, существует ли кошелек
+		var count int64
+		err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM wallets WHERE id = $1", walletID).Scan(&count)
+		if err != nil {
+			return apperrors.NewDatabaseError("проверке кошелька", err)
+		}
+		if count == 0 {
+			return apperrors.ErrWalletNotFound
+		}
+		return apperrors.ErrInsufficientFunds
+	}
+
+	return nil
+}
+
+func (r *walletRepository) CreateWallet(ctx context.Context) (*repository.Wallet, error) {
+	var wallet repository.Wallet
+	walletID := uuid.New()
+	err := r.pool.QueryRow(ctx, "INSERT INTO wallets (id, balance) VALUES ($1, 0) RETURNING id, balance", walletID).Scan(&wallet.ID, &wallet.Balance)
 	var pgErr *pgconn.PgError
 	if err != nil {
-		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
-			return fmt.Errorf("кошелёк уже существует")
+		if stderrors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
+			return nil, apperrors.ErrWalletAlreadyExists
 		}
-		return fmt.Errorf("ошибка базы данных при создании кошелька: %w", err)
+		return nil, apperrors.NewDatabaseError("создании кошелька", err)
 	}
-	return nil
+	return &wallet, nil
 }

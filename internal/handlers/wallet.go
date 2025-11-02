@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	apperrors "github.com/devopesik/wallet-basic-operations/internal/errors"
 	"github.com/devopesik/wallet-basic-operations/internal/generated"
 	"github.com/devopesik/wallet-basic-operations/internal/service"
 	"github.com/google/uuid"
@@ -20,49 +21,37 @@ func NewWalletHandler(svc service.WalletService) generated.ServerInterface {
 }
 
 func (h *walletHandler) ProcessWalletOperation(w http.ResponseWriter, r *http.Request) {
-	var req generated.WalletOperationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "некорректный JSON", http.StatusBadRequest)
-		return
-	}
-
-	// Конвертируем openapi_types.UUID → uuid.UUID
-	walletID, err := uuid.Parse(req.WalletId.String())
+	req, err := validateWalletOperationRequest(r)
 	if err != nil {
-		http.Error(w, "некорректный walletId", http.StatusBadRequest)
+		handleError(w, err)
 		return
 	}
 
-	var opType service.OperationType
+	walletID, err := validateWalletID(req.WalletId)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	if err := validateAmount(req.Amount); err != nil {
+		handleError(w, err)
+		return
+	}
+
+	if err := validateOperationType(req.OperationType); err != nil {
+		handleError(w, err)
+		return
+	}
+
 	switch req.OperationType {
 	case generated.DEPOSIT:
-		opType = service.OperationDeposit
+		err = h.service.Deposit(r.Context(), walletID, req.Amount)
 	case generated.WITHDRAW:
-		opType = service.OperationWithdraw
-	default:
-		http.Error(w, "недопустимый operationType", http.StatusBadRequest)
-		return
+		err = h.service.Withdraw(r.Context(), walletID, req.Amount)
 	}
 
-	if req.Amount <= 0 {
-		http.Error(w, "amount должен быть положительным", http.StatusBadRequest)
-		return
-	}
-
-	err = h.service.ProcessOperation(r.Context(), walletID, opType, req.Amount)
 	if err != nil {
-		switch err.Error() {
-		case "кошелёк не найден":
-			writeJSONError(w, "кошелёк не найден", http.StatusNotFound)
-		case "недостаточно средств":
-			writeJSONError(w, "недостаточно средств", http.StatusConflict)
-		case "сумма должна быть положительной":
-			writeJSONError(w, "amount должен быть положительным", http.StatusBadRequest)
-		case "неизвестный тип операции: DEPOSIT", "неизвестный тип операции: WITHDRAW":
-			writeJSONError(w, "недопустимый operationType", http.StatusBadRequest)
-		default:
-			writeJSONError(w, "внутренняя ошибка", http.StatusInternalServerError)
-		}
+		handleError(w, err)
 		return
 	}
 
@@ -70,60 +59,37 @@ func (h *walletHandler) ProcessWalletOperation(w http.ResponseWriter, r *http.Re
 }
 
 func (h *walletHandler) GetWalletBalance(w http.ResponseWriter, r *http.Request, walletId openapi_types.UUID) {
-	walletID, err := uuid.Parse(walletId.String())
+	walletID, err := validateWalletID(walletId)
 	if err != nil {
-		writeJSONError(w, "некорректный walletId", http.StatusBadRequest)
+		handleError(w, err)
 		return
 	}
 
-	balance, err := h.service.GetBalance(r.Context(), walletID)
+	wallet, err := h.service.GetWallet(r.Context(), walletID)
 	if err != nil {
-		switch err.Error() {
-		case "кошелёк не найден":
-			writeJSONError(w, "кошелёк не найден", http.StatusNotFound)
-		default:
-			writeJSONError(w, "внутренняя ошибка", http.StatusInternalServerError)
-		}
+		handleError(w, err)
 		return
 	}
 
 	resp := generated.WalletBalanceResponse{
 		WalletId: &walletId,
-		Balance:  &balance,
+		Balance:  &wallet.Balance,
 	}
 	writeJSON(w, resp, http.StatusOK)
 }
 
 func (h *walletHandler) CreateWallet(w http.ResponseWriter, r *http.Request) {
-	var req generated.CreateWalletRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, "некорректный JSON", http.StatusBadRequest)
-		return
-	}
-
-	// Конвертируем openapi_types.UUID → uuid.UUID
-	walletID, err := uuid.Parse(req.WalletId.String())
+	wallet, err := h.service.CreateWallet(r.Context())
 	if err != nil {
-		writeJSONError(w, "некорректный walletId", http.StatusBadRequest)
+		handleError(w, err)
 		return
 	}
 
-	err = h.service.CreateWallet(r.Context(), walletID)
-	if err != nil {
-		switch err.Error() {
-		case "кошелёк уже существует":
-			writeJSONError(w, "кошелёк уже существует", http.StatusConflict)
-		default:
-			writeJSONError(w, "внутренняя ошибка", http.StatusInternalServerError)
-		}
-		return
-	}
-
-	// Возвращаем созданный кошелёк с балансом 0
-	balance := int64(0)
+	// Конвертируем uuid.UUID в openapi_types.UUID для ответа
+	walletIdResponse := openapi_types.UUID(wallet.ID)
 	resp := generated.WalletBalanceResponse{
-		WalletId: &req.WalletId,
-		Balance:  &balance,
+		WalletId: &walletIdResponse,
+		Balance:  &wallet.Balance,
 	}
 	writeJSON(w, resp, http.StatusCreated)
 }
@@ -149,4 +115,53 @@ func writeJSON(w http.ResponseWriter, v interface{}, status int) {
 func writeJSONError(w http.ResponseWriter, message string, status int) {
 	errResp := generated.Error{Message: &message}
 	writeJSON(w, errResp, status)
+}
+
+// validateWalletOperationRequest валидирует и декодирует запрос на операцию с кошельком
+func validateWalletOperationRequest(r *http.Request) (*generated.WalletOperationRequest, error) {
+	var req generated.WalletOperationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return nil, apperrors.ErrInvalidJSON
+	}
+	return &req, nil
+}
+
+// validateWalletID валидирует и конвертирует openapi_types.UUID в uuid.UUID
+func validateWalletID(walletId openapi_types.UUID) (uuid.UUID, error) {
+	walletID, err := uuid.Parse(walletId.String())
+	if err != nil {
+		return uuid.Nil, apperrors.ErrInvalidWalletID
+	}
+	return walletID, nil
+}
+
+// validateAmount валидирует сумму операции
+func validateAmount(amount int64) error {
+	if amount <= 0 {
+		return apperrors.ErrInvalidAmount
+	}
+	return nil
+}
+
+// validateOperationType валидирует тип операции
+func validateOperationType(opType generated.WalletOperationRequestOperationType) error {
+	switch opType {
+	case generated.DEPOSIT, generated.WITHDRAW:
+		return nil
+	default:
+		return apperrors.ErrInvalidOperationType
+	}
+}
+
+// handleError обрабатывает ошибку и отправляет соответствующий HTTP ответ
+func handleError(w http.ResponseWriter, err error) {
+	appErr, ok := apperrors.AsAppError(err)
+	if !ok {
+		// Если это не AppError, возвращаем общую ошибку
+		message := "внутренняя ошибка"
+		writeJSONError(w, message, http.StatusInternalServerError)
+		return
+	}
+
+	writeJSONError(w, appErr.Message, appErr.HTTPStatus())
 }
