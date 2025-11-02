@@ -31,8 +31,6 @@ func (e *AppError) HTTPStatus() int {
 	return e.StatusCode
 }
 
-// Предопределённые ошибки
-
 // ErrWalletNotFound - кошелёк не найден
 var ErrWalletNotFound = &AppError{
 	Code:       ErrorCodeWalletNotFound,

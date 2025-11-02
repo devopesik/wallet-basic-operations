@@ -34,12 +34,17 @@ func (r *walletRepository) GetWallet(ctx context.Context, walletID uuid.UUID) (*
 }
 
 func (r *walletRepository) Deposit(ctx context.Context, walletID uuid.UUID, amount int64) error {
-	if amount <= 0 {
-		return apperrors.ErrInvalidAmount
+	// Начинаем транзакцию для атомарности операции
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return apperrors.NewDatabaseError("создание транзакции для пополнения", err)
 	}
+	defer tx.Rollback(ctx)
 
+	// Обновляем баланс
+	// UPDATE сам блокирует строку, поэтому SELECT FOR UPDATE не обязателен для Deposit
 	query := "UPDATE wallets SET balance = balance + $1 WHERE id = $2"
-	result, err := r.pool.Exec(ctx, query, amount, walletID)
+	result, err := tx.Exec(ctx, query, amount, walletID)
 	if err != nil {
 		return apperrors.NewDatabaseError("пополнении баланса", err)
 	}
@@ -48,31 +53,50 @@ func (r *walletRepository) Deposit(ctx context.Context, walletID uuid.UUID, amou
 		return apperrors.ErrWalletNotFound
 	}
 
+	// Коммитим транзакцию
+	if err := tx.Commit(ctx); err != nil {
+		return apperrors.NewDatabaseError("фиксация транзакции пополнения", err)
+	}
+
 	return nil
 }
 
 func (r *walletRepository) Withdraw(ctx context.Context, walletID uuid.UUID, amount int64) error {
-	if amount <= 0 {
-		return apperrors.ErrInvalidAmount
+	// Начинаем транзакцию для предотвращения race conditions
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return apperrors.NewDatabaseError("создание транзакции для списания", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var balance int64
+	err = tx.QueryRow(ctx, "SELECT balance FROM wallets WHERE id = $1 FOR UPDATE", walletID).Scan(&balance)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return apperrors.ErrWalletNotFound
+		}
+		return apperrors.NewDatabaseError("получение баланса для списания", err)
 	}
 
-	query := "UPDATE wallets SET balance = balance - $1 WHERE id = $2 AND balance >= $1"
-	result, err := r.pool.Exec(ctx, query, amount, walletID)
+	// Проверяем достаточность средств
+	if balance < amount {
+		return apperrors.ErrInsufficientFunds
+	}
+
+	// Обновляем баланс
+	query := "UPDATE wallets SET balance = balance - $1 WHERE id = $2"
+	result, err := tx.Exec(ctx, query, amount, walletID)
 	if err != nil {
-		return apperrors.NewDatabaseError("списании баланса", err)
+		return apperrors.NewDatabaseError("списание баланса", err)
 	}
 
 	if result.RowsAffected() == 0 {
-		// Проверяем, существует ли кошелек
-		var count int64
-		err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM wallets WHERE id = $1", walletID).Scan(&count)
-		if err != nil {
-			return apperrors.NewDatabaseError("проверке кошелька", err)
-		}
-		if count == 0 {
-			return apperrors.ErrWalletNotFound
-		}
-		return apperrors.ErrInsufficientFunds
+		return apperrors.ErrWalletNotFound
+	}
+
+	// Коммитим транзакцию
+	if err := tx.Commit(ctx); err != nil {
+		return apperrors.NewDatabaseError("фиксация транзакции списания", err)
 	}
 
 	return nil

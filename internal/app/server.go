@@ -46,6 +46,8 @@ func StartServer(cfg *config.Config) (*App, error) {
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
+		// BaseContext используется для создания базового контекста для listener
+		// Каждый HTTP запрос получает свой контекст через r.Context() с правильной отменой
 		BaseContext: func(l net.Listener) context.Context {
 			return context.Background()
 		},

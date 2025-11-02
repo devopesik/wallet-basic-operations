@@ -108,7 +108,7 @@ func writeJSON(w http.ResponseWriter, v interface{}, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Println("could not write json response: %w", err)
+		log.Printf("could not write json response: %v", err)
 	}
 }
 
@@ -119,6 +119,10 @@ func writeJSONError(w http.ResponseWriter, message string, status int) {
 
 // validateWalletOperationRequest валидирует и декодирует запрос на операцию с кошельком
 func validateWalletOperationRequest(r *http.Request) (*generated.WalletOperationRequest, error) {
+	// Ограничиваем размер тела запроса для защиты от больших запросов (1MB)
+	r.Body = http.MaxBytesReader(nil, r.Body, 1<<20)
+	defer r.Body.Close()
+
 	var req generated.WalletOperationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, apperrors.ErrInvalidJSON
@@ -157,11 +161,22 @@ func validateOperationType(opType generated.WalletOperationRequestOperationType)
 func handleError(w http.ResponseWriter, err error) {
 	appErr, ok := apperrors.AsAppError(err)
 	if !ok {
-		// Если это не AppError, возвращаем общую ошибку
+		// Если это не AppError, логируем как внутреннюю ошибку и возвращаем общий ответ
+		log.Printf("internal error: %v", err)
 		message := "внутренняя ошибка"
 		writeJSONError(w, message, http.StatusInternalServerError)
 		return
 	}
 
-	writeJSONError(w, appErr.Message, appErr.HTTPStatus())
+	// Логируем ошибки с контекстом
+	statusCode := appErr.HTTPStatus()
+	if statusCode >= 500 {
+		// Внутренние ошибки (5xx) логируем с полным контекстом
+		log.Printf("server error [%d]: %s: %v", statusCode, appErr.Message, appErr.Err)
+	} else {
+		// Клиентские ошибки (4xx) логируем на уровне предупреждения
+		log.Printf("client error [%d]: %s", statusCode, appErr.Message)
+	}
+
+	writeJSONError(w, appErr.Message, statusCode)
 }
